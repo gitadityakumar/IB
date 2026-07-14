@@ -4,7 +4,7 @@ import { defineConfig } from 'astro/config';
 // https://astro.build/config
 export default defineConfig({
   output: 'static',
-  site: 'https://ibank.pages.dev',
+  site: 'https://intelligence-bank.pages.dev',
   markdown: {
     shikiConfig: {
       theme: 'github-dark',

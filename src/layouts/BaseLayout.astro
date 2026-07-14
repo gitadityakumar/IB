@@ -45,7 +45,7 @@ const premiumTransition = {
 		<!-- Prevent flash of wrong theme -->
 		<script is:inline>
 			(function () {
-				function applyTheme() {
+				function getTheme() {
 					let theme;
 					try {
 						theme = localStorage.getItem('theme');
@@ -53,12 +53,22 @@ const premiumTransition = {
 					if (!theme || theme === 'system') {
 						theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 					}
+					return theme;
+				}
+
+				function applyTheme() {
+					const theme = getTheme();
 					document.documentElement.setAttribute('data-theme', theme);
 					document.documentElement.setAttribute('data-pf-theme', theme);
 				}
 
 				applyTheme();
-				document.addEventListener('astro:after-swap', applyTheme);
+
+				document.addEventListener('astro:before-swap', (event) => {
+					const theme = getTheme();
+					event.newDocument.documentElement.setAttribute('data-theme', theme);
+					event.newDocument.documentElement.setAttribute('data-pf-theme', theme);
+				});
 			})();
 		</script>
 
