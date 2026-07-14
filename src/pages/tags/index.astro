@@ -1,0 +1,36 @@
+---
+import { getCollection } from 'astro:content';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const allLearnings = await getCollection('learnings', ({ data }) => !data.draft);
+
+const tagCounts = allLearnings
+  .flatMap((l) => l.data.tags)
+  .reduce((acc, tag) => {
+    acc[tag] = (acc[tag] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+const sortedTags = Object.entries(tagCounts).sort((a, b) => b[1] - a[1]);
+---
+
+<BaseLayout title="Tags · Intelligence Bank" description="Browse agent learnings by tag.">
+  <header class="article-header">
+    <h1>Tags</h1>
+    <p class="article-description">Browse learnings grouped by topic.</p>
+  </header>
+
+  {sortedTags.length === 0 ? (
+    <div class="empty-state">
+      <p>No tags yet. Add tags to your learning frontmatter to see them here.</p>
+    </div>
+  ) : (
+    <div class="tag-cloud">
+      {sortedTags.map(([tag, count]) => (
+        <a href={`/tags/${tag.toLowerCase().replace(/\s+/g, '-')}/`} class="tag">
+          {tag} ({count})
+        </a>
+      ))}
+    </div>
+  )}
+</BaseLayout>

@@ -1,0 +1,40 @@
+---
+import { getCollection } from 'astro:content';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import LearningCard from '../../components/LearningCard.astro';
+
+export async function getStaticPaths() {
+  const allLearnings = await getCollection('learnings', ({ data }) => !data.draft);
+  const tagSet = new Set(allLearnings.flatMap((l) => l.data.tags.map((t) => t.toLowerCase().replace(/\s+/g, '-'))));
+
+  return Array.from(tagSet).map((tag) => ({
+    params: { tag },
+  }));
+}
+
+const { tag } = Astro.params;
+const allLearnings = await getCollection('learnings', ({ data }) => !data.draft);
+
+const matchingLearnings = allLearnings
+  .filter((l) => l.data.tags.some((t) => t.toLowerCase().replace(/\s+/g, '-') === tag))
+  .sort((a, b) => b.data.date.valueOf() - a.data.date.valueOf());
+
+const displayTag = matchingLearnings[0]?.data.tags.find(
+  (t) => t.toLowerCase().replace(/\s+/g, '-') === tag
+) || tag;
+---
+
+<BaseLayout title={`${displayTag} · Intelligence Bank`} description={`Agent learnings tagged with ${displayTag}.`}>
+  <header class="article-header">
+    <div class="meta">
+      <span>Tag</span>
+      <span class="meta-separator" aria-hidden="true">·</span>
+      <span>{matchingLearnings.length} learning{matchingLearnings.length === 1 ? '' : 's'}</span>
+    </div>
+    <h1>{displayTag}</h1>
+  </header>
+
+  {matchingLearnings.map((learning) => <LearningCard learning={learning} />)}
+
+  <a href="/tags" class="back-link">← All tags</a>
+</BaseLayout>

@@ -1,0 +1,56 @@
+---
+// Pagefind modal search: Ctrl/Cmd+K opens, Escape closes
+---
+
+<link href="/pagefind/pagefind-component-ui.css" rel="stylesheet" />
+<script src="/pagefind/pagefind-component-ui.js" type="module"></script>
+
+<div class="search-modal" data-pagefind-ignore>
+  <button
+    type="button"
+    class="search-trigger"
+    aria-label="Open search"
+    title="Search (Ctrl/Cmd + K)"
+  >
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle cx="11" cy="11" r="8"></circle>
+      <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+    </svg>
+  </button>
+
+  <!-- Hidden Pagefind trigger handles the actual modal and keyboard shortcut -->
+  <pagefind-modal-trigger
+    class="pf-modal-trigger-hidden"
+    shortcut="mod+k"
+    hide-shortcut
+    aria-hidden="true"
+    tabindex="-1"
+  ></pagefind-modal-trigger>
+
+  <pagefind-modal reset-on-close></pagefind-modal>
+</div>
+
+<script is:inline data-astro-rerun>
+  (function () {
+    function initSearchModal() {
+      const button = document.querySelector('.search-trigger');
+      if (!button || button.dataset.initialized === 'true') return;
+      button.dataset.initialized = 'true';
+
+      button.addEventListener('click', () => {
+        const event = new KeyboardEvent('keydown', {
+          key: 'k',
+          code: 'KeyK',
+          ctrlKey: true,
+          metaKey: false,
+          bubbles: true,
+          cancelable: true,
+        });
+        document.dispatchEvent(event);
+      });
+    }
+
+    document.addEventListener('astro:page-load', initSearchModal);
+    initSearchModal();
+  })();
+</script>

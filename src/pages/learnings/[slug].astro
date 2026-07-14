@@ -1,0 +1,54 @@
+---
+import { getCollection, render } from 'astro:content';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import TagList from '../../components/TagList.astro';
+
+export async function getStaticPaths() {
+  const learnings = await getCollection('learnings');
+  return learnings.map((learning) => ({
+    params: { slug: learning.id },
+    props: { learning },
+  }));
+}
+
+const { learning } = Astro.props;
+const { Content } = await render(learning);
+
+const { title, description, date, tags, category, source } = learning.data;
+const formattedDate = new Date(date).toLocaleDateString('en-US', {
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+});
+
+const transitionName = `learning-${learning.id}`;
+---
+
+<BaseLayout title={`${title} · Intelligence Bank`} description={description}>
+  <article>
+    <header class="article-header" transition:name={transitionName}>
+      <div class="meta">
+        <span>{formattedDate}</span>
+        <span class="meta-separator" aria-hidden="true">·</span>
+        <span>{category}</span>
+        {source && (
+          <>
+            <span class="meta-separator" aria-hidden="true">·</span>
+            <span>Source: {source}</span>
+          </>
+        )}
+      </div>
+      <h1 transition:name={`${transitionName}-title`}>{title}</h1>
+      {description && <p class="article-description">{description}</p>}
+      <TagList tags={tags} />
+    </header>
+
+    <div class="prose">
+      <Content />
+    </div>
+  </article>
+
+  <a href="/" class="back-link">
+    ← Back to all learnings
+  </a>
+</BaseLayout>

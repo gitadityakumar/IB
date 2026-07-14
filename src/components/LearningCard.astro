@@ -1,0 +1,33 @@
+---
+import type { CollectionEntry } from 'astro:content';
+import TagList from './TagList.astro';
+
+interface Props {
+  learning: CollectionEntry<'learnings'>;
+}
+
+const { learning } = Astro.props;
+const { title, description, date, tags, category } = learning.data;
+const formattedDate = new Date(date).toLocaleDateString('en-US', {
+  year: 'numeric',
+  month: 'short',
+  day: 'numeric',
+});
+
+const transitionName = `learning-${learning.id}`;
+---
+
+<article class="card" transition:name={transitionName}>
+  <h3>
+    <a href={`/learnings/${learning.id}/`} transition:name={`${transitionName}-title`}>
+      {title}
+    </a>
+  </h3>
+  <div class="meta">
+    <span>{formattedDate}</span>
+    <span class="meta-separator" aria-hidden="true">·</span>
+    <span>{category}</span>
+  </div>
+  {description && <p>{description}</p>}
+  <TagList tags={tags} />
+</article>

@@ -1,0 +1,160 @@
+---
+import '@fontsource/geist-sans';
+import '@fontsource/geist-mono';
+import '../styles/global.css';
+import ThemeToggle from '../components/ThemeToggle.astro';
+import SearchModal from '../components/SearchModal.astro';
+import CodeCopy from '../components/CodeCopy.astro';
+import Logo from '../components/Logo.astro';
+import { ClientRouter } from 'astro:transitions';
+
+interface Props {
+  title?: string;
+  description?: string;
+}
+
+const { 
+  title = 'Intelligence Bank', 
+  description = 'A searchable knowledge base of agent learnings, methods, and solutions.',
+} = Astro.props;
+
+const currentPath = Astro.url.pathname;
+
+const premiumTransition = {
+  forwards: {
+    old: { name: 'premium-out', duration: '0.5s', easing: 'cubic-bezier(0.16, 1, 0.3, 1)' },
+    new: { name: 'premium-in', duration: '0.65s', easing: 'cubic-bezier(0.16, 1, 0.3, 1)' },
+  },
+  backwards: {
+    old: { name: 'premium-in', duration: '0.5s', easing: 'cubic-bezier(0.16, 1, 0.3, 1)', direction: 'reverse' as const },
+    new: { name: 'premium-out', duration: '0.65s', easing: 'cubic-bezier(0.16, 1, 0.3, 1)', direction: 'reverse' as const },
+  },
+};
+---
+
+<html lang="en" transition:name="root" transition:animate="none">
+	<head>
+		<meta charset="utf-8" />
+		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+		<link rel="icon" href="/favicon.ico" />
+		<meta name="viewport" content="width=device-width" />
+		<meta name="generator" content={Astro.generator} />
+		<meta name="description" content={description} />
+		<title>{title}</title>
+
+		<!-- Prevent flash of wrong theme -->
+		<script is:inline>
+			(function () {
+				function applyTheme() {
+					let theme;
+					try {
+						theme = localStorage.getItem('theme');
+					} catch {}
+					if (!theme || theme === 'system') {
+						theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+					}
+					document.documentElement.setAttribute('data-theme', theme);
+					document.documentElement.setAttribute('data-pf-theme', theme);
+				}
+
+				applyTheme();
+				document.addEventListener('astro:after-swap', applyTheme);
+			})();
+		</script>
+
+		<ClientRouter />
+	</head>
+	<body>
+		<a href="#main-content" class="skip-link">Skip to main content</a>
+
+        <header transition:persist="site-header">
+      <div class="container header-inner">
+        <a href="/" class="logo" aria-label="Intelligence Bank Home">
+          <Logo size={32} class="logo-mark" />
+          <span class="logo-text">Intelligence Bank</span>
+        </a>
+        <nav aria-label="Primary" data-nav-root>
+          <a href="/" aria-current={currentPath === '/' ? 'page' : undefined}>Home</a>
+          <a href="/tags" aria-current={currentPath.startsWith('/tags') ? 'page' : undefined}>Tags</a>
+        </nav>
+        <div class="header-actions">
+          <SearchModal />
+          <ThemeToggle />
+        </div>
+      </div>
+    </header>
+
+    <script is:inline data-astro-rerun>
+      (function () {
+        function updateNavCurrent() {
+          const nav = document.querySelector('[data-nav-root]');
+          if (!nav) return;
+          const path = window.location.pathname;
+          nav.querySelectorAll('a').forEach((link) => {
+            const href = link.getAttribute('href') || '';
+            const isCurrent = href === '/' ? path === '/' : path.startsWith(href);
+            if (isCurrent) {
+              link.setAttribute('aria-current', 'page');
+            } else {
+              link.removeAttribute('aria-current');
+            }
+          });
+        }
+
+        document.addEventListener('astro:page-load', updateNavCurrent);
+        updateNavCurrent();
+      })();
+    </script>
+
+    <script is:inline>
+      (function () {
+        const HOME_SCROLL_KEY = 'ibank-home-scroll-y';
+
+        function isHome(path) {
+          return path === '/' || path === '';
+        }
+
+        let shouldRestoreHomeScroll = false;
+
+        document.addEventListener('astro:before-preparation', (event) => {
+          const currentPath = window.location.pathname;
+          if (isHome(currentPath)) {
+            try {
+              sessionStorage.setItem(HOME_SCROLL_KEY, String(window.scrollY));
+            } catch {}
+          }
+          if (event.navigationType === 'traverse' && isHome(event.to.pathname)) {
+            shouldRestoreHomeScroll = true;
+          }
+        });
+
+        document.addEventListener('astro:page-load', () => {
+          if (shouldRestoreHomeScroll && isHome(window.location.pathname)) {
+            shouldRestoreHomeScroll = false;
+            try {
+              const saved = sessionStorage.getItem(HOME_SCROLL_KEY);
+              if (saved !== null) {
+                window.scrollTo(0, parseInt(saved, 10));
+                sessionStorage.removeItem(HOME_SCROLL_KEY);
+              }
+            } catch {}
+          }
+        });
+      })();
+    </script>
+
+		<main id="main-content" data-pagefind-body transition:animate={premiumTransition}>
+			<div class="container">
+				<slot />
+			</div>
+		</main>
+
+		<footer>
+			<div class="container">
+				<a href="https://100xadi.com" class="logo" style="color: blue;"> 100XADI  </a>
+			</div>
+		</footer>
+
+		<CodeCopy />
+	</body>
+</html>
