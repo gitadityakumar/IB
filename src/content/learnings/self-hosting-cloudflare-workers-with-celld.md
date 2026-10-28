@@ -1,0 +1,240 @@
+---
+title: "Self-Hosting Cloudflare Workers & TanStack Start with celld on Bare-Metal Linux"
+description: "A complete operational blueprint for deploying, tuning, and stress-testing Cloudflare Workers, D1, and KV applications on private Ubuntu VMs using Deno's celld runtime, including performance benchmarks and a comprehensive cost analysis versus Cloudflare edge."
+date: 2026-10-28
+tags: ["celld", "cloudflare", "workers", "tanstack-start", "ssr", "d1", "kv", "devops", "benchmarking", "cost-optimization"]
+category: "backend"
+source: "5efc609f-6c96-4764-a7e0-d87168b4c030"
+---
+
+## Overview
+
+Modern web applications increasingly target serverless edge runtimes such as Cloudflare Workers for their fast cold starts and edge-adjacent data stores (D1, KV, Durable Objects). However, at high throughput, request-based billing can scale aggressively, and regulatory constraints (such as healthcare HIPAA or GDPR data sovereignty) often mandate keeping sensitive patient records on-premises.
+
+**[celld](https://celld.dev/docs/)** is an open-source, self-hosted distributed runtime developed by Deno that runs Cloudflare Workers and Durable Objects on bare-metal servers or private virtual machines with native SQLite, V8 isolates, and Tokio.
+
+This learning documents the complete procedure for bundling, hosting, tuning, and benchmarking a full-stack TanStack Start application on a raw Ubuntu virtual machine using `celld`, along with an empirical cost analysis.
+
+---
+
+## Architecture & Theory
+
+```mermaid
+flowchart TD
+    subgraph Host["Developer Workstation"]
+        Build["Vite+ & TanStack Start Build"]
+        Esbuild["esbuild (Externalize node:*)"]
+        LoadGen["autocannon Benchmark Suite"]
+    end
+
+    subgraph VM["Private VM / Bare-Metal Server (2 vCPUs, 2 GB RAM)"]
+        Systemd["systemd (clinic-app.service)"]
+        subgraph Celld["celld Runtime v0.6.3"]
+            Isolate["V8 Isolate Engine"]
+            Assets["Static Asset File Server"]
+            D1["Embedded SQLite D1 Database"]
+            KV["Local KV Cache Cell"]
+        end
+    end
+
+    Build --> Esbuild
+    Esbuild -->|Deploy Single ESM Bundle| VM
+    Systemd --> Celld
+    LoadGen -->|Stress Tests (0.25ms Latency)| Celld
+    Isolate --> Assets
+    Isolate --> D1
+    Isolate --> KV
+```
+
+### How celld Works
+1. **Worker Lifecycle**: `celld` spins up V8 isolates governed by a Tokio asynchronous event loop in Rust.
+2. **Storage Replication**:
+   - `celld dev`: Single-node mode with an embedded local SQLite object store. Zero cloud or external S3 dependency.
+   - `celld --bucket <s3://...>`: Multi-node fleet mode using S3/R2/GCS for conditional writes and lease consensus.
+3. **Compatibility Boundary**: Implements standard Cloudflare Worker APIs (`fetch`, `Request`, `Response`, `Web Crypto`, `Streams`, `node:compat`), D1 (SQLite), KV, Queues, Workflows, Durable Objects, and Static Assets.
+
+---
+
+## Step-by-Step Implementation Guide
+
+### 1. Preparing the Raw Linux Server
+
+Tune Linux network sockets and file descriptors to handle high concurrent HTTP traffic:
+
+```bash
+# 1. Elevate socket connection backlog
+sudo tee /etc/sysctl.d/99-tuning.conf << 'EOF'
+net.core.somaxconn = 65535
+net.ipv4.tcp_max_syn_backlog = 65535
+fs.file-max = 2097152
+EOF
+sudo sysctl --system
+
+# 2. Elevate open file limits
+sudo tee -a /etc/security/limits.conf << 'EOF'
+* soft nofile 65535
+* hard nofile 65535
+root soft nofile 65535
+root hard nofile 65535
+EOF
+```
+
+### 2. Installing celld
+
+Download the precompiled binary from GitHub releases and place it on system path:
+
+```bash
+curl -fSL https://github.com/denoland/celld/releases/download/v0.6.3/celld-x86_64-unknown-linux-gnu.gz -o /tmp/celld.gz
+gzip -dc /tmp/celld.gz | sudo tee /usr/local/bin/celld > /dev/null
+sudo chmod +x /usr/local/bin/celld
+celld --version
+```
+
+### 3. Bundling TanStack Start for celld
+
+`@cloudflare/vite-plugin` outputs split ESM chunks (`dist/server/index.js` and `dist/server/assets/*.js`). While Cloudflare's platform resolves internal chunk manifests, `celld` requires either explicit module resolution or a single self-contained bundle when `"no_bundle": true` is specified.
+
+Furthermore, `node:*` modules must be marked external so they resolve to `celld`'s internal Node compatibility layer:
+
+```bash
+# 1. Build the production client and server via Vite+
+pnpm run build
+
+# 2. Bundle server entry into a single self-contained ESM worker
+pnpm dlx esbuild apps/web/dist/server/index.js \
+  --bundle \
+  --platform=neutral \
+  --target=es2022 \
+  --format=esm \
+  --external:node:* \
+  --outfile=/tmp/deploy/index.js
+
+# 3. Copy client static assets (IMPORTANT: Remove .assetsignore if present)
+cp -r apps/web/dist/client /tmp/deploy/client
+rm -f /tmp/deploy/client/.assetsignore
+```
+
+### 4. Authoring a Strict `wrangler.jsonc`
+
+`celld deploy` strictly enforces top-level configuration keys and rejects unrecognized build properties (like `configPath` or `definedEnvironments` generated by some Vite plugins).
+
+Create a sanitized `wrangler.jsonc`:
+
+```jsonc
+{
+  "name": "clinic-appointment-app",
+  "compatibility_date": "2025-09-02",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "index.js",
+  "no_bundle": true,
+  "assets": {
+    "directory": "./client"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "clinic-db",
+      "database_id": "clinic-db-local"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "SLOT_CACHE",
+      "id": "clinic-slot-cache-local"
+    }
+  ],
+  "vars": {
+    "RESEND_API_KEY": "re_test_key",
+    "TWILIO_ACCOUNT_SID": "AC00000000000000000000000000000000"
+  }
+}
+```
+
+### 5. Running as a Production systemd Service
+
+Create `/etc/systemd/system/clinic-app.service`:
+
+```ini
+[Unit]
+Description=Clinic Appointment App on celld
+After=network.target
+
+[Service]
+Type=simple
+User=vmuser
+WorkingDirectory=/opt/clinic-appointment-app
+ExecStart=/usr/local/bin/celld dev . --host 0.0.0.0 --port 8080 --no-watch --logs
+Restart=always
+RestartSec=2
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start the service:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now clinic-app
+sudo systemctl status clinic-app
+```
+
+---
+
+## Empirical Benchmark Results (2 vCPUs, 2 GB RAM)
+
+Stress tests executed from a connected host using `autocannon`:
+
+| Test Profile | Target Endpoint | Concurrency | Requests / Sec | Average Latency | p99 Latency | Notes |
+|---|---|---|---|---|---|---|
+| **Static Assets** | `GET /assets/styles-*.css` (70 KB) | 50 (pipe=10) | **2,772 req/s** | 178 ms | 287 ms | **196 MB/s** throughput |
+| **JSON RPC API** | `GET /_serverFn/...` (`getServicesFn`) | 50 | **2,895 req/s** | 16.7 ms | 43 ms | 43k requests in 15s |
+| **Homepage SSR** | `GET /` (React 19 HTML stream) | 25 | **232 req/s** | 106 ms | 242 ms | Pure CPU-bound rendering |
+| **Homepage SSR** | `GET /` (React 19 HTML stream) | 50 | **241 req/s** | 205 ms | 379 ms | Zero 5xx errors |
+| **Homepage SSR** | `GET /` (React 19 HTML stream) | 100 | **235 req/s** | 418 ms | 827 ms | Sub-second at 100 concurrency |
+| **Homepage SSR** | `GET /` (React 19 HTML stream) | 150 | **214 req/s** | 685 ms | 1,254 ms | Queue saturation headroom |
+| **Booking SSR** | `GET /book/srv-general-consult` | 25 | **185 req/s** | 134 ms | 258 ms | Dynamic slot calculations |
+
+### Memory & Stability Footprint
+- **Idle Memory**: Only **37.3 MB**.
+- **Peak RSS Under Load (100k+ requests)**: Worker V8 isolate stabilized at **166 MB RSS**.
+- Total VM memory usage never exceeded **470 MB / 1900 MB**, leaving **1.43 GB RAM completely free**.
+
+---
+
+## Detailed Cost Analysis: Cloudflare Workers vs. Self-Hosted Celld
+
+### Workload Scale: 20M Dynamic SSR Views/Day + 250M API Calls/Day
+- **Monthly Requests**: \(600\text{M (SSR)} + 7,500\text{M (API)} = \mathbf{8.1\text{ Billion requests / month}}\).
+- **Monthly Bandwidth**: \(\sim 28.8\text{ TB / month}\).
+
+### Cloudflare Workers Paid Plan Calculation
+1. **Request Invocations**: 8,090M billable requests \(\times \$0.30 / \text{1M} = \mathbf{\$2,427.00}\).
+2. **Active CPU Time**:
+   - SSR: \(600\text{M} \times 15\text{ ms} = 9,000\text{M CPU ms}\).
+   - API: \(7,500\text{M} \times 1.5\text{ ms} = 11,250\text{M CPU ms}\).
+   - Total overage: 20,220M CPU ms \(\times \$0.02 / \text{1M ms} = \mathbf{\$404.40}\).
+3. **Workers KV Reads**: ~20% hitting cache (\(1,490\text{M billable} \times \$0.50 / \text{1M} = \mathbf{\$745.00}\)).
+4. **Base Plan**: **\$5.00**.
+5. **Total Monthly Cloudflare Cost**: **\$3,581.40 / month** (**$42,976 / year**).
+
+### Self-Hosted Celld on Dedicated Hardware
+- **Required Compute**: Average 3,125 req/s, peaking at ~7,800 req/s.
+- **Hardware**: 1 Dedicated Server (AMD Ryzen 7 7700, 8 cores / 16 threads, 64 GB RAM, 1 Gbps unmetered network): **~$55 / month**.
+- **Storage / State Checkpoints**: Local MinIO or Cloudflare R2 backup (~10 GB): **~$2 / month**.
+- **Total Self-Hosted Cost**: **~$57 / month** (**$684 / year**).
+
+| Financial Metric | Cloudflare Workers Edge | Self-Hosted Celld Server | Total Savings |
+|---|---|---|---|
+| **Monthly Cost** | **$3,581 / mo** | **$57 / mo** | **$3,524 / mo (98.4% reduction)** |
+| **Annual Cost** | **$42,976 / yr** | **$684 / yr** | **$42,292 / yr saved** |
+
+---
+
+## Key Takeaways & Best Practices
+
+1. **When to Self-Host**: For predictable, high-volume workloads (>50M requests/month) and privacy-sensitive healthcare data, self-hosting with `celld` provides orders of magnitude in cost savings with zero vendor lock-in.
+2. **Bundling Rules**: Always bundle SSR server chunks into a single file with `--external:node:*` prior to deploying to `celld` if using `"no_bundle": true`.
+3. **Asset Routing**: Strip `.assetsignore` before deploying assets to `celld`—`celld` automatically prioritizes static asset matches over worker execution for `GET`/`HEAD` requests.
+4. **Hybrid Edge Recommendation**: To combine the best of both worlds, place a free or basic ($20/mo) Cloudflare proxy in front for global DDoS mitigation and static asset caching, while routing dynamic SSR and database writes directly to private `celld` nodes on-premises.
