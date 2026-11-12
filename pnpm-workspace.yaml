@@ -1,3 +1,24 @@
 allowBuilds:
   esbuild: true
   workerd: true
+
+minimumReleaseAgeExclude:
+  - "@astrojs/markdown-satteri@0.4.9"
+  - "@astrojs/runtime@0.1.1"
+  - "@astrojs/vite-plugin-astro@0.1.2"
+  - astro@7.4.11
+  - miniflare@5.20261110.2-beta
+  - wrangler@4.161.0
+
+overrides:
+  devalue: ">=5.9.3"
+  js-yaml: ">=4.3.2"
+  nanoid: ">=3.3.18"
+  postcss: ">=8.5.23"
+  sharp: ">=0.35.5"
+  smol-toml: ">=1.9.0"
+  source-map-js: ">=1.2.2"
+  svgo: ">=4.1.0"
+  undici: ">=7.30.2"
+  vite: ">=8.1.6"
+  zod: ">=4.6.6"
